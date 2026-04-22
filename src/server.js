@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { config } from "./config.js";
 import { sendJson } from "./http.js";
 import { log } from "./logger.js";
-import { handleProxyRequest } from "./proxy.js";
+import { handleModelsRequest, handleProxyRequest } from "./proxy.js";
 import { notFound } from "./responses.js";
 
 const server = createServer(async (request, response) => {
@@ -20,6 +20,11 @@ const server = createServer(async (request, response) => {
 
   if (request.method === "POST" && url.pathname === "/v1/chat/completions") {
     await handleProxyRequest(request, response, "/chat/completions");
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/v1/models") {
+    await handleModelsRequest(request, response);
     return;
   }
 

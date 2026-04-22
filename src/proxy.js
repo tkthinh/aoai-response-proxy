@@ -11,7 +11,8 @@ import { readJsonBody, redactHeaders, truncate } from "./http.js";
 import { log } from "./logger.js";
 import { badGateway, badRequest, unauthorized } from "./responses.js";
 
-export async function handleProxyRequest(request, response, endpointPath) {
+async function proxyUpstreamRequest(request, response, endpointPath, options = {}) {
+  const { upstreamMethod = request.method, requestBody, stream = false } = options;
   const requestId = randomUUID();
   const startedAt = Date.now();
 
@@ -24,33 +25,6 @@ export async function handleProxyRequest(request, response, endpointPath) {
     unauthorized(response, requestId);
     return;
   }
-
-  if (!request.headers["content-type"]?.toLowerCase().includes("application/json")) {
-    badRequest(response, requestId, "Content-Type must be application/json");
-    return;
-  }
-
-  let rawBody;
-  let payload;
-
-  try {
-    const body = await readJsonBody(request);
-    rawBody = body.rawBody;
-    payload = body.parsed;
-  } catch (error) {
-    badRequest(response, requestId, error.message);
-    return;
-  }
-
-  const validationError = validateIncomingPayload(payload);
-
-  if (validationError) {
-    badRequest(response, requestId, validationError);
-    return;
-  }
-
-  const rewrittenPayload = rewritePayloadForAzure(payload);
-  const stream = rewrittenPayload.stream === true;
 
   let upstreamUrl;
   let accessToken;
@@ -71,22 +45,28 @@ export async function handleProxyRequest(request, response, endpointPath) {
     requestId,
     method: request.method,
     path: request.url,
+    upstreamMethod,
     upstreamUrl: upstreamUrl.toString(),
     headers: redactHeaders(request.headers),
-    requestBody: truncate(rawBody),
+    requestBody: truncate(requestBody),
     stream
   });
 
   let upstreamResponse;
 
   try {
+    const headers = {
+      authorization: `Bearer ${accessToken}`
+    };
+
+    if (requestBody != null) {
+      headers["content-type"] = "application/json";
+    }
+
     upstreamResponse = await fetch(upstreamUrl, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${accessToken}`
-      },
-      body: JSON.stringify(rewrittenPayload)
+      method: upstreamMethod,
+      headers,
+      body: requestBody
     });
   } catch (error) {
     log("ERROR", "Upstream request failed", {
@@ -161,4 +141,41 @@ export async function handleProxyRequest(request, response, endpointPath) {
     "content-length": Buffer.byteLength(responseText)
   });
   response.end(responseText);
+}
+
+export async function handleProxyRequest(request, response, endpointPath) {
+  if (!request.headers["content-type"]?.toLowerCase().includes("application/json")) {
+    badRequest(response, randomUUID(), "Content-Type must be application/json");
+    return;
+  }
+
+  let payload;
+
+  try {
+    payload = (await readJsonBody(request)).parsed;
+  } catch (error) {
+    badRequest(response, randomUUID(), error.message);
+    return;
+  }
+
+  const validationError = validateIncomingPayload(payload);
+
+  if (validationError) {
+    badRequest(response, randomUUID(), validationError);
+    return;
+  }
+
+  const rewrittenPayload = rewritePayloadForAzure(payload);
+
+  await proxyUpstreamRequest(request, response, endpointPath, {
+    upstreamMethod: "POST",
+    requestBody: JSON.stringify(rewrittenPayload),
+    stream: rewrittenPayload.stream === true
+  });
+}
+
+export async function handleModelsRequest(request, response) {
+  await proxyUpstreamRequest(request, response, "/models", {
+    upstreamMethod: "GET"
+  });
 }

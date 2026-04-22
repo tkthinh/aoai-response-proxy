@@ -5,6 +5,7 @@ Minimal Node.js proxy that exposes OpenAI-compatible endpoints for Codex CLI and
 ## Endpoints
 
 - `GET /healthz`
+- `GET /v1/models`
 - `POST /v1/responses`
 - `POST /v1/chat/completions`
 
@@ -86,4 +87,5 @@ export OPENAI_API_KEY="<proxy-api-key>"
 - Inbound authentication is validated from `Authorization: Bearer <token>`.
 - Outbound authentication uses Managed Identity and does not use an Azure OpenAI API key.
 - Streaming responses are passed through directly without SSE reformatting.
-- The proxy currently keeps compatibility logic minimal and only applies model alias rewriting plus removal of `api_key` from payloads.
+- `GET /v1/models` is proxied to Azure OpenAI so OpenAI-compatible clients can inspect available models/deployments.
+- The proxy currently keeps compatibility logic minimal and only applies model alias rewriting plus removal of `api_key` from payloads on request-body based endpoints.
